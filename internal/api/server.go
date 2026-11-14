@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/notification-service/naas/internal/notificationstore"
 	"github.com/notification-service/naas/internal/orchestration"
 	"github.com/notification-service/naas/internal/preferences"
 	"github.com/notification-service/naas/internal/processing"
@@ -24,6 +25,8 @@ type Server struct {
 	templateEngine   *templates.Engine
 	logger           *zap.Logger
 	httpServer       *http.Server
+	notifications    *notificationstore.Store
+	apiToken         string
 }
 
 type Config struct {
@@ -83,14 +86,19 @@ func (s *Server) setupRoutes(router *gin.Engine) {
 	router.GET("/health", s.healthCheck)
 	router.GET("/ready", s.readinessCheck)
 
+	s.mountConsole(router)
+
 	v1 := router.Group("/api/v1")
+	v1.Use(s.requireToken())
 	{
+		v1.GET("/stats/overview", s.getOverview)
+		v1.GET("/tenants", s.listTenants)
+		v1.GET("/config/summary", s.getConfigSummary)
 		v1.POST("/notifications", s.sendNotification)
 		v1.POST("/notifications/bulk", s.sendBulkNotification)
 		v1.GET("/notifications/:id", s.getNotification)
 		v1.GET("/notifications", s.listNotifications)
 		v1.POST("/notifications/:id/retry", s.retryNotification)
-		v1.DELETE("/notifications/:id", s.cancelNotification)
 
 		v1.POST("/templates", s.createTemplate)
 		v1.GET("/templates/:id", s.getTemplate)
@@ -203,22 +211,6 @@ func (s *Server) sendBulkNotification(c *gin.Context) {
 	})
 }
 
-func (s *Server) getNotification(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
-}
-
-func (s *Server) listNotifications(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
-}
-
-func (s *Server) retryNotification(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
-}
-
-func (s *Server) cancelNotification(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
-}
-
 func (s *Server) createTemplate(c *gin.Context) {
 	var req CreateTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -227,6 +219,7 @@ func (s *Server) createTemplate(c *gin.Context) {
 	}
 
 	tmpl := &models.Template{
+		ID:        models.NewID("tpl"),
 		TenantID:  req.TenantID,
 		Name:      req.Name,
 		Channel:   models.Channel(req.Channel),
@@ -246,24 +239,12 @@ func (s *Server) createTemplate(c *gin.Context) {
 }
 
 func (s *Server) getTemplate(c *gin.Context) {
-	tmpl, err := s.templateEngine.GetTemplate(c.Request.Context(), c.Param("tenant_id"), c.Param("id"))
+	tmpl, err := s.templateEngine.GetTemplate(c.Request.Context(), tenantOf(c), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, tmpl)
-}
-
-func (s *Server) updateTemplate(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
-}
-
-func (s *Server) deleteTemplate(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
-}
-
-func (s *Server) listTemplates(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 func (s *Server) renderTemplate(c *gin.Context) {
@@ -283,7 +264,7 @@ func (s *Server) renderTemplate(c *gin.Context) {
 }
 
 func (s *Server) getPreferences(c *gin.Context) {
-	prefs, err := s.preferenceMgr.GetPreferences(c.Request.Context(), c.Param("tenant_id"), c.Param("user_id"))
+	prefs, err := s.preferenceMgr.GetPreferences(c.Request.Context(), tenantOf(c), c.Param("user_id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -297,7 +278,7 @@ func (s *Server) updatePreferences(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	prefs.TenantID = c.Param("tenant_id")
+	prefs.TenantID = tenantOf(c)
 	prefs.UserID = c.Param("user_id")
 
 	if err := s.preferenceMgr.UpsertPreferences(c.Request.Context(), &prefs); err != nil {
@@ -309,8 +290,8 @@ func (s *Server) updatePreferences(c *gin.Context) {
 }
 
 func (s *Server) optOut(c *gin.Context) {
-	channel := models.Channel(c.Param("channel"))
-	if err := s.preferenceMgr.OptOut(c.Request.Context(), c.Param("tenant_id"), c.Param("user_id"), channel); err != nil {
+	channel := models.Channel(c.Query("channel"))
+	if err := s.preferenceMgr.OptOut(c.Request.Context(), tenantOf(c), c.Param("user_id"), channel); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -318,8 +299,8 @@ func (s *Server) optOut(c *gin.Context) {
 }
 
 func (s *Server) optIn(c *gin.Context) {
-	channel := models.Channel(c.Param("channel"))
-	if err := s.preferenceMgr.OptIn(c.Request.Context(), c.Param("tenant_id"), c.Param("user_id"), channel); err != nil {
+	channel := models.Channel(c.Query("channel"))
+	if err := s.preferenceMgr.OptIn(c.Request.Context(), tenantOf(c), c.Param("user_id"), channel); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -333,7 +314,7 @@ func (s *Server) setQuietHours(c *gin.Context) {
 		return
 	}
 
-	if err := s.preferenceMgr.SetQuietHours(c.Request.Context(), c.Param("tenant_id"), c.Param("user_id"), req.Enabled, req.StartHour, req.EndHour, req.Timezone); err != nil {
+	if err := s.preferenceMgr.SetQuietHours(c.Request.Context(), tenantOf(c), c.Param("user_id"), req.Enabled, req.StartHour, req.EndHour, req.Timezone); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -347,7 +328,7 @@ func (s *Server) setFrequencyCap(c *gin.Context) {
 		return
 	}
 
-	if err := s.preferenceMgr.SetFrequencyCap(c.Request.Context(), c.Param("tenant_id"), c.Param("user_id"), req.Category, req.MaxCount, req.Window); err != nil {
+	if err := s.preferenceMgr.SetFrequencyCap(c.Request.Context(), tenantOf(c), c.Param("user_id"), req.Category, req.MaxCount, req.Window); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -386,10 +367,6 @@ func (s *Server) getDigestRule(c *gin.Context) {
 func (s *Server) getRateLimitStats(c *gin.Context) {
 	stats := s.reliabilityMgr.GetRateLimitStatus()
 	c.JSON(http.StatusOK, stats)
-}
-
-func (s *Server) getProviderStats(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
 }
 
 func (s *Server) loggingMiddleware() gin.HandlerFunc {

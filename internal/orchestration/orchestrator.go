@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/notification-service/naas/internal/channels"
@@ -22,7 +23,13 @@ type Orchestrator struct {
 	preferenceManager *preferences.Manager
 	channelRegistry  *channels.Registry
 	reliabilityMgr   *reliability.Manager
+	recorder         NotificationRecorder
 	logger           *zap.Logger
+}
+
+// NotificationRecorder persists the lifecycle of every notification for the console and audits.
+type NotificationRecorder interface {
+	Save(ctx context.Context, notification *models.Notification) error
 }
 
 type PreferencesManager interface {
@@ -59,11 +66,71 @@ func (o *Orchestrator) SetChannelRegistry(registry *channels.Registry) {
 	o.channelRegistry = registry
 }
 
+func (o *Orchestrator) SetNotificationRecorder(recorder NotificationRecorder) {
+	o.recorder = recorder
+}
+
+const defaultMaxRetries = 3
+
+// prepare fills identifiers and defaults a caller may omit, so every notification is trackable.
+func prepareNotification(notification *models.Notification) {
+	if notification.ID == "" {
+		notification.ID = models.NewID("ntf")
+	}
+
+	if notification.Payload == nil {
+		notification.Payload = map[string]interface{}{}
+	}
+
+	if notification.MaxRetries == 0 {
+		notification.MaxRetries = defaultMaxRetries
+	}
+
+	if notification.Status == "" {
+		notification.Status = models.StatusPending
+	}
+
+	if notification.CreatedAt.IsZero() {
+		notification.CreatedAt = time.Now()
+	}
+}
+
+var suppressionReasons = []string{"opted out", "disabled for user"}
+
+func statusForFailure(err error) models.Status {
+	for _, reason := range suppressionReasons {
+		if strings.Contains(err.Error(), reason) {
+			return models.StatusSuppressed
+		}
+	}
+
+	return models.StatusFailed
+}
+
+// finish records the final state of an Execute call.
+func (o *Orchestrator) finish(ctx context.Context, notification *models.Notification, executeErr error) {
+	if executeErr != nil {
+		notification.Status = statusForFailure(executeErr)
+		notification.Error = executeErr.Error()
+	}
+
+	if o.recorder == nil {
+		return
+	}
+
+	if err := o.recorder.Save(context.WithoutCancel(ctx), notification); err != nil {
+		o.logger.Error("Failed to persist notification", zap.String("notification_id", notification.ID), zap.Error(err))
+	}
+}
+
 func (o *Orchestrator) SetReliabilityManager(mgr *reliability.Manager) {
 	o.reliabilityMgr = mgr
 }
 
-func (o *Orchestrator) Execute(ctx context.Context, notification *models.Notification, processor interface{}) error {
+func (o *Orchestrator) Execute(ctx context.Context, notification *models.Notification, processor interface{}) (executeErr error) {
+	prepareNotification(notification)
+	defer func() { o.finish(ctx, notification, executeErr) }()
+
 	var proc ProcessorInterface
 	if processor != nil {
 		if p, ok := processor.(ProcessorInterface); ok {
@@ -152,8 +219,8 @@ func (o *Orchestrator) sendNotification(ctx context.Context, notification *model
 		TenantID:  notification.TenantID,
 		UserID:    notification.UserID,
 		To:        o.getRecipientAddress(notification),
-		Subject:   notification.Payload["subject"].(string),
-		Body:      notification.Payload["body"].(string),
+		Subject:   stringFromPayload(notification.Payload, "subject"),
+		Body:      stringFromPayload(notification.Payload, "body"),
 		Variables: notification.Variables,
 		Metadata:  notification.Metadata,
 		Priority:  notification.Priority,
@@ -168,6 +235,7 @@ func (o *Orchestrator) sendNotification(ctx context.Context, notification *model
 			}
 			message.Subject = subject
 			message.Body = body
+			notification.Payload["subject"], notification.Payload["body"] = subject, body
 		}
 	}
 
@@ -185,6 +253,11 @@ func (o *Orchestrator) sendNotification(ctx context.Context, notification *model
 	return nil
 }
 
+func stringFromPayload(payload map[string]interface{}, key string) string {
+	value, _ := payload[key].(string)
+	return value
+}
+
 func (o *Orchestrator) getRecipientAddress(notification *models.Notification) string {
 	if addr, ok := notification.Metadata["recipient"].(string); ok {
 		return addr
@@ -196,7 +269,8 @@ func (o *Orchestrator) getRecipientAddress(notification *models.Notification) st
 		return notification.UserID
 	}
 	if notification.Channel == models.ChannelPush {
-		return notification.Metadata["device_token"].(string)
+		token, _ := notification.Metadata["device_token"].(string)
+		return token
 	}
 	return notification.UserID
 }
@@ -273,4 +347,36 @@ func (o *Orchestrator) ExecuteBulk(ctx context.Context, job *processing.BulkJob,
 
 func (o *Orchestrator) AddToDigest(ctx context.Context, event *models.Event, digestKey string, window time.Duration, processor ProcessorInterface) error {
 	return processor.AddToDigest(ctx, event, digestKey, window)
+}
+// ProviderHealth is the live state of one configured channel provider.
+type ProviderHealth struct {
+	Channel  models.Channel `json:"channel"`
+	Name     string         `json:"name"`
+	Healthy  bool           `json:"healthy"`
+	Detail   string         `json:"detail,omitempty"`
+}
+
+var allChannels = []models.Channel{models.ChannelEmail, models.ChannelSMS, models.ChannelPush, models.ChannelInApp, models.ChannelWebhook, models.ChannelVoice}
+
+// ProviderHealth probes every registered provider.
+func (o *Orchestrator) ProviderHealth(ctx context.Context) []ProviderHealth {
+	health := []ProviderHealth{}
+
+	if o.channelRegistry == nil {
+		return health
+	}
+
+	for _, channel := range allChannels {
+		for _, provider := range o.channelRegistry.GetProviders(channel) {
+			entry := ProviderHealth{Channel: channel, Name: provider.Name(), Healthy: true}
+
+			if err := provider.HealthCheck(ctx); err != nil {
+				entry.Healthy, entry.Detail = false, err.Error()
+			}
+
+			health = append(health, entry)
+		}
+	}
+
+	return health
 }

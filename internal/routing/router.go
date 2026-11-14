@@ -181,10 +181,19 @@ func (r *Router) getCircuitBreakerState(channel models.Channel, providerName str
 	return "closed"
 }
 
+// SetConfig provides routing rules (fallback chains); without it only the built-in defaults apply.
+func (r *Router) SetConfig(cfg *config.Config) {
+	r.config = cfg
+}
+
 func (r *Router) getFallbackChain(notification *models.Notification) []FallbackStep {
 	var fallbacks []FallbackStep
 
-	fallbackRules := r.config.Routing.FallbackRules
+	var fallbackRules []config.FallbackRuleConfig
+	if r.config != nil {
+		fallbackRules = r.config.Routing.FallbackRules
+	}
+
 	for _, rule := range fallbackRules {
 		if rule.FromChannel == string(notification.Channel) {
 			fallbacks = append(fallbacks, FallbackStep{

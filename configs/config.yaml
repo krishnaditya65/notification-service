@@ -246,7 +246,7 @@ reliability:
       - "rate limit"
   dlq:
     max_retries: 5
-    retention: "7d"
+    retention: "168h"
   rate_limiter:
     global_rate_limit: 10000
     per_channel_limit:

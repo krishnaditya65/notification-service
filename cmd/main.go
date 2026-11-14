@@ -8,10 +8,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/notification-service/naas/internal/api"
 	"github.com/notification-service/naas/internal/analytics"
+	"github.com/notification-service/naas/internal/api"
 	"github.com/notification-service/naas/internal/channels"
 	"github.com/notification-service/naas/internal/config"
+	"github.com/notification-service/naas/internal/notificationstore"
 	"github.com/notification-service/naas/internal/orchestration"
 	"github.com/notification-service/naas/internal/preferences"
 	"github.com/notification-service/naas/internal/processing"
@@ -61,14 +62,19 @@ func main() {
 	}
 	defer store.Close()
 
+	notificationStore := notificationstore.New(store.DB)
+	if err := notificationStore.EnsureSchema(ctx); err != nil {
+		logger.Fatal("Failed to apply database schema", zap.Error(err))
+	}
+
 	templateStore := templates.NewPostgresStore(store.DB)
 
 	redisConfig := models.RedisConfig{
-		Addresses:     cfg.Redis.Addresses,
-		Password:      cfg.Redis.Password,
-		DB:            cfg.Redis.DB,
-		PoolSize:      cfg.Redis.PoolSize,
-		MinIdleConns:  cfg.Redis.MinIdleConns,
+		Addresses:    cfg.Redis.Addresses,
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.DB,
+		PoolSize:     cfg.Redis.PoolSize,
+		MinIdleConns: cfg.Redis.MinIdleConns,
 	}
 	redisClient := models.NewRedisClient(redisConfig)
 	defer redisClient.Close()
@@ -77,6 +83,7 @@ func main() {
 	channelRegistry := channels.NewRegistry(cfg, logger)
 	preferenceManager := preferences.NewManager(store.DB, redisClient, logger)
 	router := routing.NewRouter(channelRegistry, preferenceManager, logger)
+	router.SetConfig(cfg)
 	orchestrator := orchestration.NewOrchestrator(router, templateEngine, preferenceManager, logger)
 	processor := processing.NewProcessor(store.DB, redisClient, logger)
 	reliabilityManager := reliability.NewManager(store.DB, redisClient, cfg, logger)
@@ -89,6 +96,7 @@ func main() {
 	}, logger)
 
 	orchestrator.SetChannelRegistry(channelRegistry)
+	orchestrator.SetNotificationRecorder(notificationStore)
 	orchestrator.SetReliabilityManager(reliabilityManager)
 
 	server := api.NewServer(&api.Config{
@@ -98,6 +106,8 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,
 	}, orchestrator, processor, reliabilityManager, preferenceManager, templateEngine, logger)
+
+	server.SetConsole(notificationStore, os.Getenv("NAAS_API_TOKEN"))
 
 	if err := reliabilityManager.Start(ctx, orchestrator); err != nil {
 		logger.Fatal("Failed to start reliability manager", zap.Error(err))

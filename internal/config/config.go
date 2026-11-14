@@ -8,180 +8,180 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Kafka    KafkaConfig
-	Channels ChannelsConfig
-	Routing  RoutingConfig
-	Processing ProcessingConfig
-	Reliability ReliabilityConfig
-	Analytics AnalyticsConfig
+	Server      ServerConfig      `mapstructure:"server"`
+	Database    DatabaseConfig    `mapstructure:"database"`
+	Redis       RedisConfig       `mapstructure:"redis"`
+	Kafka       KafkaConfig       `mapstructure:"kafka"`
+	Channels    ChannelsConfig    `mapstructure:"channels"`
+	Routing     RoutingConfig     `mapstructure:"routing"`
+	Processing  ProcessingConfig  `mapstructure:"processing"`
+	Reliability ReliabilityConfig `mapstructure:"reliability"`
+	Analytics   AnalyticsConfig   `mapstructure:"analytics"`
 }
 
 type ServerConfig struct {
-	Port         string
-	Host         string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
+	Port         string        `mapstructure:"port"`
+	Host         string        `mapstructure:"host"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
 }
 
 type DatabaseConfig struct {
-	Host            string
-	Port            int
-	User            string
-	Password        string
-	Database        string
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
+	Host            string        `mapstructure:"host"`
+	Port            int           `mapstructure:"port"`
+	User            string        `mapstructure:"user"`
+	Password        string        `mapstructure:"password"`
+	Database        string        `mapstructure:"database"`
+	MaxOpenConns    int           `mapstructure:"max_open_conns"`
+	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 }
 
 type RedisConfig struct {
-	Addresses  []string
-	Password   string
-	DB         int
-	PoolSize   int
-	MinIdleConns int
+	Addresses    []string `mapstructure:"addresses"`
+	Password     string   `mapstructure:"password"`
+	DB           int      `mapstructure:"db"`
+	PoolSize     int      `mapstructure:"pool_size"`
+	MinIdleConns int      `mapstructure:"min_idle_conns"`
 }
 
 type KafkaConfig struct {
-	Brokers  []string
-	Topic    string
-	GroupID  string
-	Security string
+	Brokers  []string `mapstructure:"brokers"`
+	Topic    string   `mapstructure:"topic"`
+	GroupID  string   `mapstructure:"group_id"`
+	Security string   `mapstructure:"security"`
 }
 
 type ChannelsConfig struct {
-	Email    EmailConfig
-	SMS      SMSConfig
-	Push     PushConfig
-	InApp    InAppConfig
-	Webhook  WebhookConfig
-	Voice    VoiceConfig
+	Email   EmailConfig   `mapstructure:"email"`
+	SMS     SMSConfig     `mapstructure:"sms"`
+	Push    PushConfig    `mapstructure:"push"`
+	InApp   InAppConfig   `mapstructure:"in_app"`
+	Webhook WebhookConfig `mapstructure:"webhook"`
+	Voice   VoiceConfig   `mapstructure:"voice"`
 }
 
 type EmailConfig struct {
-	Providers []ProviderConfig
-	DefaultProvider string
+	Providers       []ProviderConfig `mapstructure:"providers"`
+	DefaultProvider string           `mapstructure:"default_provider"`
 }
 
 type SMSConfig struct {
-	Providers []ProviderConfig
-	DefaultProvider string
+	Providers       []ProviderConfig `mapstructure:"providers"`
+	DefaultProvider string           `mapstructure:"default_provider"`
 }
 
 type PushConfig struct {
-	APNs APNsConfig
-	FCM  FCMConfig
+	APNs APNsConfig `mapstructure:"ap_ns"`
+	FCM  FCMConfig  `mapstructure:"fcm"`
 }
 
 type APNsConfig struct {
-	KeyID      string
-	TeamID     string
-	BundleID   string
-	PrivateKey string
-	Production bool
+	KeyID      string `mapstructure:"key_id"`
+	TeamID     string `mapstructure:"team_id"`
+	BundleID   string `mapstructure:"bundle_id"`
+	PrivateKey string `mapstructure:"private_key"`
+	Production bool   `mapstructure:"production"`
 }
 
 type FCMConfig struct {
-	ServerKey string
-	ProjectID string
+	ServerKey string `mapstructure:"server_key"`
+	ProjectID string `mapstructure:"project_id"`
 }
 
 type InAppConfig struct {
-	WebSocketPort int
-	MaxConnections int
+	WebSocketPort  int `mapstructure:"web_socket_port"`
+	MaxConnections int `mapstructure:"max_connections"`
 }
 
 type WebhookConfig struct {
-	Timeout time.Duration
-	Retries int
+	Timeout time.Duration `mapstructure:"timeout"`
+	Retries int           `mapstructure:"retries"`
 }
 
 type VoiceConfig struct {
-	Providers []ProviderConfig
-	DefaultProvider string
+	Providers       []ProviderConfig `mapstructure:"providers"`
+	DefaultProvider string           `mapstructure:"default_provider"`
 }
 
 type ProviderConfig struct {
-	Name        string
-	Priority    int
-	Enabled     bool
-	Config      map[string]string
-	RateLimit   RateLimitConfig
-	CircuitBreaker CircuitBreakerConfig
+	Name           string               `mapstructure:"name"`
+	Priority       int                  `mapstructure:"priority"`
+	Enabled        bool                 `mapstructure:"enabled"`
+	Config         map[string]string    `mapstructure:"config"`
+	RateLimit      RateLimitConfig      `mapstructure:"rate_limit"`
+	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 }
 
 type RateLimitConfig struct {
-	RequestsPerSecond float64
-	Burst             int
+	RequestsPerSecond float64 `mapstructure:"requests_per_second"`
+	Burst             int     `mapstructure:"burst"`
 }
 
 type CircuitBreakerConfig struct {
-	FailureThreshold int
-	SuccessThreshold int
-	Timeout          time.Duration
+	FailureThreshold int           `mapstructure:"failure_threshold"`
+	SuccessThreshold int           `mapstructure:"success_threshold"`
+	Timeout          time.Duration `mapstructure:"timeout"`
 }
 
 type RoutingConfig struct {
-	Tiers []TierConfig
-	FallbackRules []FallbackRuleConfig
+	Tiers         []TierConfig         `mapstructure:"tiers"`
+	FallbackRules []FallbackRuleConfig `mapstructure:"fallback_rules"`
 }
 
 type TierConfig struct {
-	Name        string
-	Priority    int
-	Channels    []string
-	RateLimit   RateLimitConfig
+	Name      string          `mapstructure:"name"`
+	Priority  int             `mapstructure:"priority"`
+	Channels  []string        `mapstructure:"channels"`
+	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
 }
 
 type FallbackRuleConfig struct {
-	FromChannel string
-	ToChannel   string
-	Delay       time.Duration
-	Condition   string
+	FromChannel string        `mapstructure:"from_channel"`
+	ToChannel   string        `mapstructure:"to_channel"`
+	Delay       time.Duration `mapstructure:"delay"`
+	Condition   string        `mapstructure:"condition"`
 }
 
 type ProcessingConfig struct {
-	DigestEnabled     bool
-	DigestWindow      time.Duration
-	MaxDigestSize     int
-	BulkChunkSize     int
-	IdempotencyTTL    time.Duration
+	DigestEnabled  bool          `mapstructure:"digest_enabled"`
+	DigestWindow   time.Duration `mapstructure:"digest_window"`
+	MaxDigestSize  int           `mapstructure:"max_digest_size"`
+	BulkChunkSize  int           `mapstructure:"bulk_chunk_size"`
+	IdempotencyTTL time.Duration `mapstructure:"idempotency_ttl"`
 }
 
 type ReliabilityConfig struct {
-	RetryPolicy RetryPolicyConfig
-	DLQ         DLQConfig
-	RateLimiter RateLimiterConfig
+	RetryPolicy RetryPolicyConfig `mapstructure:"retry_policy"`
+	DLQ         DLQConfig         `mapstructure:"dlq"`
+	RateLimiter RateLimiterConfig `mapstructure:"rate_limiter"`
 }
 
 type RetryPolicyConfig struct {
-	MaxRetries      int
-	InitialDelay    time.Duration
-	MaxDelay        time.Duration
-	Multiplier      float64
-	RetryableErrors []string
+	MaxRetries      int           `mapstructure:"max_retries"`
+	InitialDelay    time.Duration `mapstructure:"initial_delay"`
+	MaxDelay        time.Duration `mapstructure:"max_delay"`
+	Multiplier      float64       `mapstructure:"multiplier"`
+	RetryableErrors []string      `mapstructure:"retryable_errors"`
 }
 
 type DLQConfig struct {
-	MaxRetries int
-	Retention  time.Duration
+	MaxRetries int           `mapstructure:"max_retries"`
+	Retention  time.Duration `mapstructure:"retention"`
 }
 
 type RateLimiterConfig struct {
-	GlobalRateLimit float64
-	PerChannelLimit map[string]float64
+	GlobalRateLimit float64            `mapstructure:"global_rate_limit"`
+	PerChannelLimit map[string]float64 `mapstructure:"per_channel_limit"`
 }
 
 type AnalyticsConfig struct {
-	Enabled         bool
-	EventTopic      string
-	RetentionDays   int
-	AuditEnabled    bool
-	KafkaBrokers    []string
+	Enabled       bool     `mapstructure:"enabled"`
+	EventTopic    string   `mapstructure:"event_topic"`
+	RetentionDays int      `mapstructure:"retention_days"`
+	AuditEnabled  bool     `mapstructure:"audit_enabled"`
+	KafkaBrokers  []string `mapstructure:"kafka_brokers"`
 }
 
 func Load() (*Config, error) {
